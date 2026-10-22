@@ -1,0 +1,112 @@
+name: Build Free My TV APK
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      city:
+        description: 'Город (название, например Moscow)'
+        required: false
+        default: ''
+      latitude:
+        description: 'Широта (для заката и погоды)'
+        required: false
+        default: '55.7558'
+      longitude:
+        description: 'Долгота (для заката и погоды)'
+        required: false
+        default: '37.6173'
+      language:
+        description: 'Язык (auto, ru, en)'
+        required: false
+        default: 'ru'
+      tmdb_region:
+        description: 'Код страны (RU, US, etc.)'
+        required: false
+        default: 'RU'
+      tmdb_key:
+        description: 'TMDB API Key (необязательно)'
+        required: false
+        default: ''
+      create_release:
+        description: 'Создать GitHub Release с прямой ссылкой на APK'
+        type: boolean
+        required: false
+        default: true
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android Build Tools and Platform
+        run: |
+          yes | sdkmanager --licenses || true
+          sdkmanager "build-tools;34.0.0" "platforms;android-34"
+
+      - name: Configure properties
+        run: |
+          if [ ! -f config.properties ]; then
+            cp config.example.properties config.properties
+          fi
+
+          if [ -n "${{ inputs.city }}" ]; then
+            sed -i 's/^city=.*/city=${{ inputs.city }}/' config.properties
+          fi
+          if [ -n "${{ inputs.latitude }}" ]; then
+            sed -i 's/^latitude=.*/latitude=${{ inputs.latitude }}/' config.properties
+          fi
+          if [ -n "${{ inputs.longitude }}" ]; then
+            sed -i 's/^longitude=.*/longitude=${{ inputs.longitude }}/' config.properties
+          fi
+          if [ -n "${{ inputs.language }}" ]; then
+            sed -i 's/^language=.*/language=${{ inputs.language }}/' config.properties
+          fi
+          if [ -n "${{ inputs.tmdb_region }}" ]; then
+            sed -i 's/^tmdb_region=.*/tmdb_region=${{ inputs.tmdb_region }}/' config.properties
+          fi
+          if [ -n "${{ inputs.tmdb_key }}" ]; then
+            sed -i 's/^tmdb_key=.*/tmdb_key=${{ inputs.tmdb_key }}/' config.properties
+          fi
+
+          echo "config.properties preview (keys masked):"
+          grep -v -E "tmdb_key|watchmode_key" config.properties
+
+      - name: Run build script
+        run: |
+          chmod +x build.sh
+          ./build.sh
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: FreeMyTV-APK
+          path: FreeMyTV.apk
+          if-no-files-found: error
+
+      - name: Create GitHub Release
+        if: ${{ inputs.create_release == true }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG_NAME="build-$(date +'%Y%m%d-%H%M%S')"
+          gh release create "$TAG_NAME" FreeMyTV.apk \
+            --title "Free My TV APK ($TAG_NAME)" \
+            --notes "Automated build of FreeMyTV.apk"
